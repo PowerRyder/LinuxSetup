@@ -86,3 +86,20 @@ echo -e "Do NOT close this session until confirmed!"
 
 
 
+sudo dnf install -y firewalld
+
+sudo systemctl start firewalld
+
+sudo systemctl enable firewalld
+
+sudo systemctl status firewalld
+
+sudo firewall-cmd --permanent --add-port=$NEW_PORT/tcp
+
+sudo firewall-cmd --permanent --remove-service=ssh
+
+sudo firewall-cmd --permanent --remove-port=22/tcp
+
+sudo firewall-cmd --reload
+
+sudo firewall-cmd --list-all
