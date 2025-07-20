@@ -78,6 +78,8 @@ sudo firewall-cmd --permanent --add-port=443/udp
 sudo firewall-cmd --reload
 
 # Step 11: Prepare default web root
+read -p "Enter the username you want to assign ownership of /var/www: " USER
+
 sudo groupadd -g 1000 sharedgroup
 sudo usermod -aG sharedgroup $USER
 
