@@ -78,8 +78,13 @@ sudo firewall-cmd --permanent --add-port=443/udp
 sudo firewall-cmd --reload
 
 # Step 11: Prepare default web root
+sudo groupadd -g 1000 sharedgroup
+sudo usermod -aG sharedgroup $USER
+
 sudo mkdir -p /var/www
-sudo chown -R $USER:$USER /var/www
-sudo chmod -R 755 /var/www
+sudo chown -R $USER:sharedgroup /var/www
+sudo chmod -R 775 /var/www
+sudo chmod -R g+rw /var/www
+
 
 echo "✅ Nginx with HTTP/3 and QUIC installed and configured successfully."
