@@ -112,21 +112,35 @@ log_info "📀 Step 8: Configuring for remote connections and performance..."
 
 # Edit postgresql.conf
 log_info "Updating ${PG_CONF_FILE}..."
-sed -i "s/^#listen_addresses = 'localhost'/listen_addresses = '*'/" "$PG_CONF_FILE"
-sed -i "s/^port = 5432/port = ${PG_PORT}/" "$PG_CONF_FILE"
+# sed -i "s/^#listen_addresses = 'localhost'/listen_addresses = '*'/" "$PG_CONF_FILE"
+# sed -i "s/^port = 5432/port = ${PG_PORT}/" "$PG_CONF_FILE"
 
-# Append performance settings
-cat <<EOF >> "$PG_CONF_FILE"
 
-# --- Custom Settings Added By Script ---
-shared_buffers = 500MB
-work_mem = 16MB
-effective_cache_size = 2GB
-maintenance_work_mem = 256MB
-wal_buffers = 16MB
-random_page_cost = 1.1
-# --- End Custom Settings ---
-EOF
+sudo sed -i -E "s/^[# ]*listen_addresses\s*=.*/listen_addresses = '*'/g" "$PG_CONF_FILE"
+sudo sed -i -E "s/^[# ]*port\s*=.*/port = ${PG_PORT}/g" "$PG_CONF_FILE"
+
+
+# Memory settings
+sudo sed -i -E "s/^[# ]*shared_buffers\s*=.*/shared_buffers = 500MB/g" "$PG_CONF_FILE"
+sudo sed -i -E "s/^[# ]*work_mem\s*=.*/work_mem = 16MB/g" "$PG_CONF_FILE"
+sudo sed -i -E "s/^[# ]*effective_cache_size\s*=.*/effective_cache_size = 2GB/g" "$PG_CONF_FILE"
+sudo sed -i -E "s/^[# ]*maintenance_work_mem\s*=.*/maintenance_work_mem = 256MB/g" "$PG_CONF_FILE"
+sudo sed -i -E "s/^[# ]*wal_buffers\s*=.*/wal_buffers = 16MB/g" "$PG_CONF_FILE"
+sudo sed -i -E "s/^[# ]*random_page_cost\s*=.*/random_page_cost = 1.1/g" "$PG_CONF_FILE"
+
+
+# # Append performance settings
+# cat <<EOF >> "$PG_CONF_FILE"
+
+# # --- Custom Settings Added By Script ---
+# shared_buffers = 500MB
+# work_mem = 16MB
+# effective_cache_size = 2GB
+# maintenance_work_mem = 256MB
+# wal_buffers = 16MB
+# random_page_cost = 1.1
+# # --- End Custom Settings ---
+# EOF
 
 # Edit pg_hba.conf to allow remote connections
 log_info "Updating ${PG_HBA_FILE} to allow access from ${WHITELIST_IP}..."
