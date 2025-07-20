@@ -83,6 +83,8 @@ log_info "📦 Step 3: Installing PostgreSQL ${PG_VERSION} server and client..."
 dnf install -y postgresql${PG_VERSION}-server postgresql${PG_VERSION}
 if [ $? -ne 0 ]; then log_error "Failed to install PostgreSQL packages."; exit 1; fi
 
+dnf install -y postgresql17-contrib
+
 # --- Step 4: Initialize Database Cluster ---
 log_info "⚙️ Step 4: Initializing the database cluster..."
 /usr/pgsql-${PG_VERSION}/bin/postgresql-${PG_VERSION}-setup initdb
