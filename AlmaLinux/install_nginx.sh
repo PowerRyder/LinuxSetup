@@ -44,4 +44,6 @@ sudo chown -R $USER:sharedgroup /var/www
 sudo chmod -R 775 /var/www
 sudo chmod -R g+rw /var/www
 
+sudo dnf install certbot python3-certbot-nginx -y
+
 echo "✅ Setup complete. You can now add your virtual hosts to /etc/nginx/sites-available and symlink them to /etc/nginx/sites-enabled"

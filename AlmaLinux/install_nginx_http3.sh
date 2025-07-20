@@ -88,5 +88,7 @@ sudo chown -R $USER:sharedgroup /var/www
 sudo chmod -R 775 /var/www
 sudo chmod -R g+rw /var/www
 
+# Step 12: Install Certbot for SSL
+sudo dnf install certbot python3-certbot-nginx -y
 
 echo "✅ Nginx with HTTP/3 and QUIC installed and configured successfully."
