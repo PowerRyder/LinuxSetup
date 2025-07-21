@@ -43,6 +43,7 @@ sudo mkdir -p /var/www
 sudo chown -R $USER:sharedgroup /var/www
 sudo chmod -R 775 /var/www
 sudo chmod -R g+rw /var/www
+sudo chown -R 1000:1000 /var/www
 
 
 echo "✅ Setup complete. You can now add your virtual hosts to /etc/nginx/sites-available and symlink them to /etc/nginx/sites-enabled"

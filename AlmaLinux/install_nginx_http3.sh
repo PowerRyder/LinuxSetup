@@ -87,5 +87,6 @@ sudo mkdir -p /var/www
 sudo chown -R $USER:sharedgroup /var/www
 sudo chmod -R 775 /var/www
 sudo chmod -R g+rw /var/www
+sudo chown -R 1000:1000 /var/www
 
 echo "✅ Nginx with HTTP/3 and QUIC installed and configured successfully."
