@@ -4,6 +4,9 @@
 # This script logs into the server as postgres user and backs up all databases
 # Saves backups in password-protected 7z files with date-wise naming
 
+# Set timezone to India Standard Time
+export TZ='Asia/Kolkata'
+
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Define variables
@@ -24,7 +27,7 @@ TEMP_BACKUP_DIR="$BACKUP_DIR/temp_$DATE"
 
 # Function to log messages
 log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOGFILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - $1" | tee -a "$LOGFILE"
 }
 
 # Function to cleanup on error
@@ -55,50 +58,51 @@ fi
 # Switch to the postgres user and perform the backup
 sudo -u postgres bash <<EOF
 set -e
+export TZ='Asia/Kolkata'
 
 # Create temporary backup directory
 mkdir -p "$TEMP_BACKUP_DIR"
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Created temporary backup directory: $TEMP_BACKUP_DIR" >> "$LOGFILE"
+echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - Created temporary backup directory: $TEMP_BACKUP_DIR" >> "$LOGFILE"
 
 # Test PostgreSQL connection
 if ! $PSQL -U $PG_USER -p $PG_PORT -c "SELECT version();" > /dev/null 2>&1; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Cannot connect to PostgreSQL server" >> "$LOGFILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - ERROR: Cannot connect to PostgreSQL server" >> "$LOGFILE"
     exit 1
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Successfully connected to PostgreSQL server" >> "$LOGFILE"
+echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - Successfully connected to PostgreSQL server" >> "$LOGFILE"
 
 # Get the list of databases (excluding templates)
 DBS=\$($PSQL -U $PG_USER -p $PG_PORT -t -c "SELECT datname FROM pg_database WHERE datistemplate = false;" | grep -v "^\s*$" | tr -d ' ')
 
 if [ -z "\$DBS" ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: No databases found to backup" >> "$LOGFILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - ERROR: No databases found to backup" >> "$LOGFILE"
     exit 1
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Found databases to backup: \$DBS" >> "$LOGFILE"
+echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - Found databases to backup: \$DBS" >> "$LOGFILE"
 
 # Dump each database
 BACKUP_COUNT=0
 for DB in \$DBS; do
     if [ ! -z "\$DB" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Backing up database: \$DB" >> "$LOGFILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - Backing up database: \$DB" >> "$LOGFILE"
         
         if $PG_DUMP -U $PG_USER -p $PG_PORT "\$DB" > "$TEMP_BACKUP_DIR/\${DB}_$DATE.sql" 2>>"$LOGFILE"; then
             BACKUP_SIZE=\$(du -h "$TEMP_BACKUP_DIR/\${DB}_$DATE.sql" | cut -f1)
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - Successfully backed up \$DB (Size: \$BACKUP_SIZE)" >> "$LOGFILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - Successfully backed up \$DB (Size: \$BACKUP_SIZE)" >> "$LOGFILE"
             BACKUP_COUNT=\$((BACKUP_COUNT + 1))
         else
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: Failed to backup database \$DB" >> "$LOGFILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - ERROR: Failed to backup database \$DB" >> "$LOGFILE"
         fi
     fi
 done
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Completed backup of \$BACKUP_COUNT databases" >> "$LOGFILE"
+echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - Completed backup of \$BACKUP_COUNT databases" >> "$LOGFILE"
 
 # Check if any backups were created
 if [ \$BACKUP_COUNT -eq 0 ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: No databases were successfully backed up" >> "$LOGFILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S %Z') - ERROR: No databases were successfully backed up" >> "$LOGFILE"
     exit 1
 fi
 
