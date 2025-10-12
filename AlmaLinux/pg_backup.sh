@@ -18,7 +18,7 @@ ARCHIVE_PASSWORD="UDp^@Y^rLSzPdCr!j"
 # PostgreSQL configuration
 PSQL="/usr/pgsql-17/bin/psql"
 PG_USER="postgres"
-PG_PORT="4268"
+PG_PORT="3554"
 PG_DUMP="/usr/pgsql-17/bin/pg_dump"
 
 # Logging
@@ -41,12 +41,18 @@ set -e
 trap cleanup EXIT
 
 # Start backup process
+# Create log file with proper permissions first
+touch "$LOGFILE"
+chmod 664 "$LOGFILE"
+chown postgres:postgres "$LOGFILE"
+
 log_message "Starting PostgreSQL backup process"
 
-# Ensure backup directory exists
+# Verify backup directory exists (should be created by setup_pg_backup.sh)
 if [ ! -d "$BACKUP_DIR" ]; then
-    mkdir -p "$BACKUP_DIR"
-    log_message "Created backup directory: $BACKUP_DIR"
+    log_message "ERROR: Backup directory does not exist: $BACKUP_DIR"
+    log_message "Please run setup_pg_backup.sh first to create the required directories"
+    exit 1
 fi
 
 # Check if required tools are available

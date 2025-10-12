@@ -100,16 +100,17 @@ create_directories() {
     fi
     
     # Set proper ownership and permissions
-    chown postgres:postgres "$BACKUP_DIR"
-    chmod 755 "$BACKUP_DIR"
-    print_success "Set ownership and permissions for $BACKUP_DIR"
+    # Directory should be owned by root but postgres should be able to write temp files
+    chown root:postgres "$BACKUP_DIR"
+    chmod 2775 "$BACKUP_DIR"  # 2775 = rwxrwsr-x (setgid bit + 775)
+    print_success "Set ownership and permissions for $BACKUP_DIR (with setgid bit)"
     
     # Create a logs subdirectory for better organization
     if [ ! -d "$BACKUP_DIR/logs" ]; then
         mkdir -p "$BACKUP_DIR/logs"
-        chown postgres:postgres "$BACKUP_DIR/logs"
-        chmod 755 "$BACKUP_DIR/logs"
-        print_success "Created logs directory: $BACKUP_DIR/logs"
+        chown root:postgres "$BACKUP_DIR/logs"
+        chmod 2775 "$BACKUP_DIR/logs"  # 2775 = rwxrwsr-x (setgid bit + 775)
+        print_success "Created logs directory: $BACKUP_DIR/logs (with setgid bit)"
     fi
 }
 
