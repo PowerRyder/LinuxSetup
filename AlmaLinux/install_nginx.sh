@@ -36,14 +36,21 @@ sudo firewall-cmd --reload
 
 read -p "Enter the username you want to assign ownership of /var/www: " USER
 
-sudo groupadd -g 1000 sharedgroup
-sudo usermod -aG sharedgroup $USER
+# Get or create group with GID 1000
+if getent group 1000 > /dev/null 2>&1; then
+    GROUP_NAME=$(getent group 1000 | cut -d: -f1)
+    echo "ℹ️ Using existing group '$GROUP_NAME' (GID 1000)."
+else
+    GROUP_NAME="sharedgroup"
+    sudo groupadd -g 1000 $GROUP_NAME
+    echo "✅ Created group '$GROUP_NAME' with GID 1000."
+fi
+sudo usermod -aG $GROUP_NAME $USER
 
 sudo mkdir -p /var/www
-sudo chown -R $USER:sharedgroup /var/www
+sudo chown -R $USER:$GROUP_NAME /var/www
 sudo chmod -R 775 /var/www
 sudo chmod -R g+rw /var/www
-sudo chown -R 1000:1000 /var/www
 
 
 echo "✅ Setup complete. You can now add your virtual hosts to /etc/nginx/sites-available and symlink them to /etc/nginx/sites-enabled"
