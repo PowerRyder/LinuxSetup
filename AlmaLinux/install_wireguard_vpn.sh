@@ -27,23 +27,46 @@ echo
 
 # --- Gather settings (with sensible defaults) --------------------------------
 
+# WireGuard interface + config path
+WG_IFACE="wg0"
+CONF="/etc/wireguard/${WG_IFACE}.conf"
+
+# If the server is already configured, steer toward the add-client script and
+# never silently change an existing port/subnet.
+EXISTING_PORT=""
+EXISTING_SUBNET=""
+if [[ -f "$CONF" ]]; then
+    EXISTING_PORT=$(grep -oP '^\s*ListenPort\s*=\s*\K[0-9]+' "$CONF" | head -1 || true)
+    EXISTING_SUBNET=$(grep -oP '^\s*Address\s*=\s*\K[0-9./]+' "$CONF" | head -1 || true)
+    echo "⚠️  WireGuard is already configured here (port ${EXISTING_PORT}, subnet ${EXISTING_SUBNET})."
+    echo "   ➜ To simply ADD a client, cancel and run:  sudo ./add_wireguard_client.sh"
+    echo "     (that keeps your port, keys and existing clients untouched)"
+    echo
+    read -p "Re-run FULL setup anyway (rewrites ${CONF})? [y/N]: " REDO
+    REDO=${REDO:-N}
+    if [[ ! "$REDO" =~ ^[Yy]$ ]]; then
+        echo "Nothing changed. Exiting."
+        exit 0
+    fi
+    echo "Proceeding with full re-setup (existing port/subnet kept as defaults)..."
+    echo
+fi
+
 # WireGuard UDP listen port.
-# A random high port is used by default so the service is less obvious to
-# port scanners. Press Enter to accept the random one, or type your own.
-RANDOM_PORT=$(shuf -i 20000-60000 -n 1)
-read -p "➡️  WireGuard UDP port [random: ${RANDOM_PORT}]: " WG_PORT
-WG_PORT=${WG_PORT:-$RANDOM_PORT}
+# Reuse the existing port if present; otherwise pick a random high port so the
+# service is less obvious to port scanners. Press Enter to accept the default.
+DEFAULT_PORT=${EXISTING_PORT:-$(shuf -i 20000-60000 -n 1)}
+read -p "➡️  WireGuard UDP port [${DEFAULT_PORT}]: " WG_PORT
+WG_PORT=${WG_PORT:-$DEFAULT_PORT}
 
 # VPN internal network (server takes .1, clients get .2, .3, ...)
-read -p "➡️  VPN internal subnet (CIDR) [10.0.0.0/24]: " WG_SUBNET
-WG_SUBNET=${WG_SUBNET:-10.0.0.0/24}
+DEFAULT_SUBNET=${EXISTING_SUBNET:-10.0.0.0/24}
+read -p "➡️  VPN internal subnet (CIDR) [${DEFAULT_SUBNET}]: " WG_SUBNET
+WG_SUBNET=${WG_SUBNET:-$DEFAULT_SUBNET}
 # Derive the /24 base (e.g. 10.0.0) and prefix length
 WG_BASE=$(echo "$WG_SUBNET" | cut -d'/' -f1 | awk -F'.' '{print $1"."$2"."$3}')
 WG_PREFIX=$(echo "$WG_SUBNET" | cut -d'/' -f2)
 WG_SERVER_IP="${WG_BASE}.1"
-
-# WireGuard interface name
-WG_IFACE="wg0"
 
 # Auto-detect the internet-facing network interface
 DEFAULT_IFACE=$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')
@@ -168,8 +191,8 @@ for i in $(seq 1 "$CLIENT_COUNT"); do
     default_name="client${i}"
     read -p "   Name for client #${i} [${default_name}]: " CLIENT_NAME </dev/tty
     CLIENT_NAME=${CLIENT_NAME:-$default_name}
-    # sanitize name
-    CLIENT_NAME=$(echo "$CLIENT_NAME" | tr -cd '[:alnum:]_-')
+    # sanitize name: keep letters/digits/_/- and allow up to 32 characters
+    CLIENT_NAME=$(echo "$CLIENT_NAME" | tr -cd '[:alnum:]_-' | cut -c1-32)
 
     CLIENT_IP="${WG_BASE}.$((i + 1))"
 
@@ -210,10 +233,25 @@ done
 # --- Lock down the server config ---------------------------------------------
 chmod 600 /etc/wireguard/${WG_IFACE}.conf
 
+# Save reusable, client-facing parameters so add_wireguard_client.sh can build
+# new client configs without asking for them again.
+cat > /etc/wireguard/${WG_IFACE}.params <<EOF
+SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP}
+CLIENT_DNS=${CLIENT_DNS}
+SNAT_IP=${SNAT_IP}
+NET_IFACE=${NET_IFACE}
+EOF
+chmod 600 /etc/wireguard/${WG_IFACE}.params
+
 # --- Open the firewall port --------------------------------------------------
 echo "🧱 Opening firewall UDP port ${WG_PORT}..."
-firewall-cmd --permanent --add-port=${WG_PORT}/udp
-firewall-cmd --reload
+# Add to the RUNNING firewall immediately, then persist it. We deliberately
+# avoid `firewall-cmd --reload` here: a reload re-parses EVERY firewalld object
+# and aborts if any unrelated one is invalid (e.g. a policy whose name exceeds
+# firewalld's 18-char limit). Adding to runtime + permanent gives the same
+# result without depending on the rest of the config being valid.
+firewall-cmd --add-port=${WG_PORT}/udp || true
+firewall-cmd --permanent --add-port=${WG_PORT}/udp || true
 
 # --- Start the tunnel --------------------------------------------------------
 echo "🚀 Starting WireGuard..."
@@ -248,4 +286,6 @@ for conf in /etc/wireguard/clients/*.conf; do
     echo
 done
 
-echo "Done. To add more clients later, re-run this script or edit /etc/wireguard/${WG_IFACE}.conf"
+echo "Done."
+echo "➕ To add more clients later WITHOUT touching the port/keys, run:"
+echo "     sudo ./add_wireguard_client.sh"
