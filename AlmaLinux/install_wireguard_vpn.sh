@@ -91,8 +91,12 @@ fi
 # --- Install packages --------------------------------------------------------
 echo
 echo "📦 Installing packages..."
-dnf install -y epel-release
-dnf install -y wireguard-tools firewalld qrencode
+# --setopt=*.skip_if_unavailable=1 keeps an unrelated broken/retired repo
+# (e.g. an old pgdg13 PostgreSQL repo returning HTTP 410) from aborting the
+# whole transaction — dnf will just skip repos it can't reach.
+DNF_OPTS="--setopt=*.skip_if_unavailable=1"
+dnf install -y $DNF_OPTS epel-release
+dnf install -y $DNF_OPTS wireguard-tools firewalld qrencode
 
 # --- Enable WireGuard kernel module (persist across reboots) ------------------
 echo "🧩 Enabling WireGuard kernel module..."
