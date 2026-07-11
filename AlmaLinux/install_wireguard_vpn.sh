@@ -86,13 +86,9 @@ fi
 # Leave blank to use the default masquerade (works for single-IP servers).
 read -p "➡️  Fixed outgoing source IP for VPN traffic [blank = auto/masquerade]: " SNAT_IP
 
-# DNS servers pushed to clients
+# DNS servers pushed to clients (saved as the default for add_wireguard_client.sh)
 read -p "➡️  DNS server(s) for clients [1.1.1.1]: " CLIENT_DNS
 CLIENT_DNS=${CLIENT_DNS:-1.1.1.1}
-
-# How many client configs to generate
-read -p "➡️  How many client configs to generate? [1]: " CLIENT_COUNT
-CLIENT_COUNT=${CLIENT_COUNT:-1}
 
 echo
 echo "📋 Summary:"
@@ -102,7 +98,6 @@ echo "   WAN interface   : ${NET_IFACE}"
 echo "   Endpoint        : ${SERVER_PUBLIC_IP}:${WG_PORT}"
 echo "   Outgoing IP     : ${SNAT_IP:-default (masquerade)}"
 echo "   Client DNS      : ${CLIENT_DNS}"
-echo "   Clients         : ${CLIENT_COUNT}"
 echo
 read -p "Proceed with installation? [Y/n]: " CONFIRM
 CONFIRM=${CONFIRM:-Y}
@@ -119,7 +114,7 @@ echo "📦 Installing packages..."
 # whole transaction — dnf will just skip repos it can't reach.
 DNF_OPTS="--setopt=*.skip_if_unavailable=1"
 dnf install -y $DNF_OPTS epel-release
-dnf install -y $DNF_OPTS wireguard-tools firewalld qrencode
+dnf install -y $DNF_OPTS wireguard-tools firewalld
 
 # --- Enable WireGuard kernel module (persist across reboots) ------------------
 echo "🧩 Enabling WireGuard kernel module..."
@@ -172,8 +167,20 @@ if [[ -n "$SNAT_IP" ]]; then
     POSTDOWN="${POSTDOWN}; firewall-cmd --direct --remove-rule ipv4 nat POSTROUTING 0 -s ${WG_BASE}.0/${WG_PREFIX} -o ${NET_IFACE} -j SNAT --to-source ${SNAT_IP}"
 fi
 
-# --- Write the server config -------------------------------------------------
+# --- Write the server config (preserving any existing client peers) ----------
+# NOTE: this script sets up the SERVER only. It never generates client keys —
+# clients create their own keypair locally and are added later, by public key,
+# with add_wireguard_client.sh. That way no client private key ever touches the
+# server.
 echo "📝 Writing server config /etc/wireguard/${WG_IFACE}.conf ..."
+
+# If we're re-running a full setup, keep the [Peer] blocks already present so
+# existing clients are not dropped.
+EXISTING_PEERS=""
+if [[ -f /etc/wireguard/${WG_IFACE}.conf ]]; then
+    EXISTING_PEERS=$(awk '/^\[Peer\]/{p=1} p{print}' /etc/wireguard/${WG_IFACE}.conf)
+fi
+
 cat > /etc/wireguard/${WG_IFACE}.conf <<EOF
 [Interface]
 # VPN gateway server
@@ -185,50 +192,10 @@ PostUp = ${POSTUP}
 PostDown = ${POSTDOWN}
 EOF
 
-# --- Generate clients and append them as peers -------------------------------
-echo "👥 Generating ${CLIENT_COUNT} client config(s)..."
-for i in $(seq 1 "$CLIENT_COUNT"); do
-    default_name="client${i}"
-    read -p "   Name for client #${i} [${default_name}]: " CLIENT_NAME </dev/tty
-    CLIENT_NAME=${CLIENT_NAME:-$default_name}
-    # sanitize name: keep letters/digits/_/- and allow up to 32 characters
-    CLIENT_NAME=$(echo "$CLIENT_NAME" | tr -cd '[:alnum:]_-' | cut -c1-32)
-
-    CLIENT_IP="${WG_BASE}.$((i + 1))"
-
-    wg genkey | tee "/etc/wireguard/clients/${CLIENT_NAME}_private.key" \
-        | wg pubkey > "/etc/wireguard/clients/${CLIENT_NAME}_public.pub"
-    chmod 0400 "/etc/wireguard/clients/${CLIENT_NAME}_private.key"
-
-    CLIENT_PRIVATE_KEY=$(cat "/etc/wireguard/clients/${CLIENT_NAME}_private.key")
-    CLIENT_PUBLIC_KEY=$(cat "/etc/wireguard/clients/${CLIENT_NAME}_public.pub")
-
-    # Append the peer to the server config
-    cat >> /etc/wireguard/${WG_IFACE}.conf <<EOF
-
-[Peer]
-# ${CLIENT_NAME}
-PublicKey = ${CLIENT_PUBLIC_KEY}
-AllowedIPs = ${CLIENT_IP}/32
-EOF
-
-    # Build the client-side config (routes ALL traffic through the server)
-    CLIENT_CONF="/etc/wireguard/clients/${CLIENT_NAME}.conf"
-    cat > "$CLIENT_CONF" <<EOF
-[Interface]
-PrivateKey = ${CLIENT_PRIVATE_KEY}
-Address = ${CLIENT_IP}/${WG_PREFIX}
-DNS = ${CLIENT_DNS}
-
-[Peer]
-PublicKey = ${SERVER_PUBLIC_KEY}
-Endpoint = ${SERVER_PUBLIC_IP}:${WG_PORT}
-AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25
-EOF
-    chmod 0600 "$CLIENT_CONF"
-    echo "   ✅ ${CLIENT_NAME} -> ${CLIENT_IP}  (config: ${CLIENT_CONF})"
-done
+if [[ -n "$EXISTING_PEERS" ]]; then
+    echo "   ↺ Preserving existing client peers."
+    printf '\n%s\n' "$EXISTING_PEERS" >> /etc/wireguard/${WG_IFACE}.conf
+fi
 
 # --- Lock down the server config ---------------------------------------------
 chmod 600 /etc/wireguard/${WG_IFACE}.conf
@@ -267,25 +234,15 @@ systemctl --no-pager status wg-quick@${WG_IFACE} | head -n 4 || true
 echo
 wg show || true
 echo
-echo "🔗 Connection details (what a client needs):"
+echo "🔗 Server is ready. A client needs:"
 echo "   Endpoint          : ${SERVER_PUBLIC_IP}:${WG_PORT}"
 echo "   Server public key : ${SERVER_PUBLIC_KEY}"
 echo "   Listening port    : ${WG_PORT}/udp  (opened in firewalld)"
 echo
-echo "📱 Client configs are in: /etc/wireguard/clients/*.conf"
-echo "   Import the .conf file into the WireGuard app, or scan the QR below."
-echo
-
-# --- Print QR codes for each client ------------------------------------------
-for conf in /etc/wireguard/clients/*.conf; do
-    name=$(basename "$conf" .conf)
-    echo "----------------------------------------------------------"
-    echo "📲 ${name}"
-    echo "----------------------------------------------------------"
-    qrencode -t ansiutf8 < "$conf"
-    echo
-done
-
-echo "Done."
-echo "➕ To add more clients later WITHOUT touching the port/keys, run:"
-echo "     sudo ./add_wireguard_client.sh"
+echo "➕ Next step — add a client (no client private key is ever stored here):"
+echo "   1. On the client, open the WireGuard app → 'Add empty tunnel'."
+echo "      It generates a private key and shows a PUBLIC key."
+echo "   2. Copy that public key, then on this server run:"
+echo "        sudo ./add_wireguard_client.sh"
+echo "      Paste the client's public key when asked; it prints a config to"
+echo "      paste back into the client's tunnel."

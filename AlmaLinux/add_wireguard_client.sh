@@ -2,13 +2,17 @@
 #
 # add_wireguard_client.sh
 # -----------------------------------------------------------------------------
-# Add a new client (peer) to an ALREADY-configured WireGuard VPN gateway.
+# Add a client (peer) to an already-configured WireGuard VPN gateway — WITHOUT
+# ever handling the client's private key.
 #
-# Safe to run any number of times. It does NOT change the server port, keys,
-# subnet, firewall, or any existing client — it only appends the new peer and
-# hot-loads it with `wg syncconf`, so current connections stay up.
+# The client generates its own keypair locally (e.g. WireGuard app -> "Add empty
+# tunnel"), and you paste only its PUBLIC key here. This script:
+#   * appends the peer (public key + assigned VPN IP) to the server config,
+#   * hot-loads it with `wg syncconf` (existing connections stay up),
+#   * prints a ready-to-paste client config (with a placeholder for the private
+#     key, which never leaves the client).
 #
-# Prerequisite: the server was set up with install_wireguard_vpn.sh.
+# Prerequisite: server was set up with install_wireguard_vpn.sh.
 #
 #     chmod +x add_wireguard_client.sh
 #     sudo ./add_wireguard_client.sh
@@ -32,7 +36,6 @@ if [[ ! -f "$CONF" ]]; then
     exit 1
 fi
 mkdir -p "$CLIENT_DIR"
-umask 077
 
 # --- Read server settings straight from the running config -------------------
 WG_PORT=$(grep -oP '^\s*ListenPort\s*=\s*\K[0-9]+' "$CONF" | head -1 || true)
@@ -68,8 +71,8 @@ if [[ -z "$SERVER_PUBLIC_IP" ]]; then
     exit 1
 fi
 
-# --- Client name -------------------------------------------------------------
-read -p "➡️  New client name: " CLIENT_NAME
+# --- Client name (label only — used for the peer comment + a local record) ---
+read -p "➡️  Client name (label): " CLIENT_NAME
 # keep letters/digits/_/- and allow up to 32 characters
 CLIENT_NAME=$(echo "$CLIENT_NAME" | tr -cd '[:alnum:]_-' | cut -c1-32)
 if [[ -z "$CLIENT_NAME" ]]; then
@@ -82,8 +85,27 @@ if [[ -f "${CLIENT_DIR}/${CLIENT_NAME}.conf" ]]; then
     exit 1
 fi
 
+# --- Client PUBLIC key (generated on the client, pasted here) ----------------
+echo
+echo "On the client device: open the WireGuard app, choose 'Add empty tunnel'"
+echo "(it creates the private key locally and shows a Public key), then copy that"
+echo "public key and paste it below."
+echo
+read -p "➡️  Client PUBLIC key: " CLIENT_PUBLIC_KEY
+CLIENT_PUBLIC_KEY=$(echo "$CLIENT_PUBLIC_KEY" | tr -d '[:space:]')
+
+# Validate it looks like a WireGuard key (32 bytes base64 -> 44 chars ending '=')
+if [[ ! "$CLIENT_PUBLIC_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+    echo "❌ That doesn't look like a valid WireGuard public key (expected 44 base64 chars ending in '=')."
+    exit 1
+fi
+# Reject duplicates
+if grep -qF "$CLIENT_PUBLIC_KEY" "$CONF"; then
+    echo "❌ This public key is already configured as a peer. Nothing to do."
+    exit 1
+fi
+
 # --- Find the next free VPN IP (server is .1) --------------------------------
-# Collect the last octet of every AllowedIPs entry that belongs to our subnet.
 USED=$(awk -v base="$WG_BASE" '
     $1 == "AllowedIPs" {
         ip = $3
@@ -113,13 +135,6 @@ if (( NEXT > 254 )); then
 fi
 CLIENT_IP="${WG_BASE}.${NEXT}"
 
-# --- Generate client keys ----------------------------------------------------
-wg genkey | tee "${CLIENT_DIR}/${CLIENT_NAME}_private.key" \
-    | wg pubkey > "${CLIENT_DIR}/${CLIENT_NAME}_public.pub"
-chmod 0400 "${CLIENT_DIR}/${CLIENT_NAME}_private.key"
-CLIENT_PRIVATE_KEY=$(cat "${CLIENT_DIR}/${CLIENT_NAME}_private.key")
-CLIENT_PUBLIC_KEY=$(cat "${CLIENT_DIR}/${CLIENT_NAME}_public.pub")
-
 # --- Append the peer to the server config ------------------------------------
 cat >> "$CONF" <<EOF
 
@@ -129,11 +144,16 @@ PublicKey = ${CLIENT_PUBLIC_KEY}
 AllowedIPs = ${CLIENT_IP}/32
 EOF
 
-# --- Build the client-side config --------------------------------------------
+# --- Save a local record of this peer (no secrets in it) ---------------------
+# This documents which VPN IP / public key belongs to which client. It is a
+# TEMPLATE: the PrivateKey line stays a placeholder that only the client fills.
 CLIENT_CONF="${CLIENT_DIR}/${CLIENT_NAME}.conf"
+umask 077
 cat > "$CLIENT_CONF" <<EOF
+# Client: ${CLIENT_NAME}  (VPN IP ${CLIENT_IP})
+# PublicKey (on server) = ${CLIENT_PUBLIC_KEY}
 [Interface]
-PrivateKey = ${CLIENT_PRIVATE_KEY}
+PrivateKey = <YOUR_CLIENT_PRIVATE_KEY_STAYS_ON_THE_CLIENT>
 Address = ${CLIENT_IP}/${WG_PREFIX}
 DNS = ${CLIENT_DNS}
 
@@ -143,7 +163,6 @@ Endpoint = ${SERVER_PUBLIC_IP}:${WG_PORT}
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
-chmod 0600 "$CLIENT_CONF"
 
 # --- Apply live without disrupting existing peers ----------------------------
 if wg show "$WG_IFACE" >/dev/null 2>&1; then
@@ -154,23 +173,31 @@ else
     systemctl enable --now "wg-quick@${WG_IFACE}"
 fi
 
+# --- Show the client what to paste -------------------------------------------
 echo
 echo "=============================================================="
 echo "✅ Added client '${CLIENT_NAME}'  ->  ${CLIENT_IP}"
 echo
-echo "🔗 Connection details:"
-echo "   Endpoint          : ${SERVER_PUBLIC_IP}:${WG_PORT}"
-echo "   Server public key : ${SERVER_PUBLIC_KEY}"
-echo "   Config file       : ${CLIENT_CONF}"
+echo "📋 Paste the following into the client's WireGuard tunnel."
+echo "   The [Interface] already has the private key it generated — you only"
+echo "   need to set Address/DNS and add the [Peer] block. Full config shown:"
+echo "--------------------------8<--------------------------------"
+cat <<EOF
+[Interface]
+# (keep the PrivateKey the client already generated)
+Address = ${CLIENT_IP}/${WG_PREFIX}
+DNS = ${CLIENT_DNS}
+
+[Peer]
+PublicKey = ${SERVER_PUBLIC_KEY}
+AllowedIPs = 0.0.0.0/0
+Endpoint = ${SERVER_PUBLIC_IP}:${WG_PORT}
+PersistentKeepalive = 25
+EOF
+echo "-------------------------->8--------------------------------"
 echo
-echo "📲 Scan this QR with the WireGuard app, or import the .conf above:"
-echo "----------------------------------------------------------"
-if command -v qrencode >/dev/null 2>&1; then
-    qrencode -t ansiutf8 < "$CLIENT_CONF"
-else
-    echo "(qrencode not installed — run: sudo dnf install -y qrencode)"
-fi
-echo "----------------------------------------------------------"
+echo "(A copy of this — with a private-key placeholder — is saved for your"
+echo " records at ${CLIENT_CONF}; it contains no secrets.)"
 echo
 echo "Current peers:"
 wg show "$WG_IFACE" || true
