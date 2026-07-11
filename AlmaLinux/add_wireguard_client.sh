@@ -164,13 +164,36 @@ AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
 
-# --- Apply live without disrupting existing peers ----------------------------
+# --- Apply the change automatically ------------------------------------------
+# Preferred: `wg syncconf` hot-loads the new peer WITHOUT dropping existing
+# connections. If that fails (e.g. the config has an unrelated malformed peer),
+# fall back to a full `wg-quick` restart, which re-reads the whole config.
+apply_ok=false
 if wg show "$WG_IFACE" >/dev/null 2>&1; then
     echo "🔄 Applying new peer to the running tunnel (no restart)..."
-    wg syncconf "$WG_IFACE" <(wg-quick strip "$WG_IFACE")
+    if wg syncconf "$WG_IFACE" <(wg-quick strip "$WG_IFACE"); then
+        apply_ok=true
+    else
+        echo "   ⚠️  Live apply failed — falling back to a full restart of wg-quick@${WG_IFACE}..."
+        if systemctl restart "wg-quick@${WG_IFACE}"; then
+            apply_ok=true
+        fi
+    fi
 else
     echo "🚀 Tunnel not running — starting it..."
-    systemctl enable --now "wg-quick@${WG_IFACE}"
+    if systemctl enable --now "wg-quick@${WG_IFACE}"; then
+        apply_ok=true
+    fi
+fi
+
+if [[ "$apply_ok" != true ]]; then
+    echo
+    echo "❌ Could not apply the configuration. This almost always means wg0.conf"
+    echo "   contains a malformed [Peer] (typically one missing a PublicKey)."
+    echo "   The new peer WAS written to ${CONF}, but is not active yet."
+    echo "   Inspect what WireGuard sees:   sudo wg-quick strip ${WG_IFACE}"
+    echo "   Remove the bad [Peer] block, then:  sudo systemctl restart wg-quick@${WG_IFACE}"
+    exit 1
 fi
 
 # --- Show the client what to paste -------------------------------------------
