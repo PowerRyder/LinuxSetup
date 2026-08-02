@@ -52,6 +52,10 @@ if ! [[ "$WHITELIST_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]]; then
     log_error "Invalid IP address format. Aborting."
     exit 1
 fi
+# pg_hba.conf treats a bare IP as a hostname; it must be CIDR notation to match
+if [[ "$WHITELIST_IP" != */* ]]; then
+    WHITELIST_IP="${WHITELIST_IP}/32"
+fi
 
 read -s -p "Enter a new password for the 'postgres' database user: " POSTGRES_PASSWORD
 echo
@@ -70,20 +74,26 @@ PG_SERVICE="postgresql-${PG_VERSION}"
 
 # --- Step 1: Add PostgreSQL Repository ---
 log_info "Step 1: Adding PostgreSQL YUM repository..."
-dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+EL_VERSION=$(rpm -E %rhel)
+dnf install -y "https://download.postgresql.org/pub/repos/yum/reporpms/EL-${EL_VERSION}-$(uname -m)/pgdg-redhat-repo-latest.noarch.rpm"
 if [ $? -ne 0 ]; then log_error "Failed to add repository."; exit 1; fi
 
 # --- Step 2: Disable Built-in PostgreSQL Module ---
-log_info "Step 2: Disabling the built-in PostgreSQL module..."
-dnf -qy module disable postgresql
-# if [ $? -ne 0 ]; then log_error "Failed to disable module."; exit 1; fi
+# dnf modularity only exists on EL8/EL9; EL10 removed it entirely.
+if [ "$EL_VERSION" -le 9 ]; then
+    log_info "Step 2: Disabling the built-in PostgreSQL module..."
+    dnf -qy module disable postgresql
+else
+    log_info "Step 2: Skipping module disable (no dnf modularity on EL${EL_VERSION})."
+fi
 
 # --- Step 3: Install PostgreSQL Packages ---
 log_info "Step 3: Installing PostgreSQL ${PG_VERSION} server and client..."
 dnf install -y postgresql${PG_VERSION}-server postgresql${PG_VERSION}
 if [ $? -ne 0 ]; then log_error "Failed to install PostgreSQL packages."; exit 1; fi
 
-dnf install -y postgresql17-contrib
+dnf install -y postgresql${PG_VERSION}-contrib
+if [ $? -ne 0 ]; then log_error "Failed to install postgresql${PG_VERSION}-contrib."; exit 1; fi
 
 # --- Step 4: Initialize Database Cluster ---
 log_info "Step 4: Initializing the database cluster..."
@@ -148,8 +158,19 @@ sudo sed -i -E "s/^[# ]*random_page_cost\s*=.*/random_page_cost = 1.1/g" "$PG_CO
 log_info "Updating ${PG_HBA_FILE} to allow access from ${WHITELIST_IP}..."
 echo "host    all             all             ${WHITELIST_IP}        scram-sha-256" >> "$PG_HBA_FILE"
 
-# --- Step 9: Configure Firewall ---
-log_info "Step 9: Adding firewall rule for port ${PG_PORT}..."
+# --- Step 9: Allow the Port in SELinux ---
+# SELinux only lets postgres bind to ports labeled postgresql_port_t (5432 by
+# default); without this, the restart fails on any custom port.
+if command -v getenforce > /dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ] && [ "$PG_PORT" != "5432" ]; then
+    log_info "Step 9: Labeling port ${PG_PORT} as postgresql_port_t in SELinux..."
+    dnf install -y policycoreutils-python-utils > /dev/null
+    semanage port -a -t postgresql_port_t -p tcp "$PG_PORT" 2> /dev/null || \
+        semanage port -m -t postgresql_port_t -p tcp "$PG_PORT"
+    if [ $? -ne 0 ]; then log_error "Failed to label port ${PG_PORT} in SELinux."; exit 1; fi
+fi
+
+# --- Step 10: Configure Firewall ---
+log_info "Step 10: Adding firewall rule for port ${PG_PORT}..."
 firewall-cmd --zone=public --add-port=${PG_PORT}/tcp --permanent > /dev/null 2>&1
 firewall-cmd --reload > /dev/null 2>&1
 if [ $? -ne 0 ]; then log_error "Failed to configure firewall."; exit 1; fi
