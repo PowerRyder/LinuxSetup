@@ -78,15 +78,18 @@ sudo firewall-cmd --permanent --add-port=443/udp
 sudo firewall-cmd --reload
 
 # Step 11: Prepare default web root
-read -p "Enter the username you want to assign ownership of /var/www: " USER
+read -p "Enter the username you want to assign ownership of /var/www: " WWW_USER
 
-sudo groupadd -g 1000 sharedgroup
-sudo usermod -aG sharedgroup $USER
+if ! id "$WWW_USER" &>/dev/null; then
+    echo "User '$WWW_USER' does not exist."
+    exit 1
+fi
+
+getent group sharedgroup >/dev/null || sudo groupadd sharedgroup
+sudo usermod -aG sharedgroup "$WWW_USER"
 
 sudo mkdir -p /var/www
-sudo chown -R $USER:sharedgroup /var/www
-sudo chmod -R 775 /var/www
-sudo chmod -R g+rw /var/www
-sudo chown -R 1000:1000 /var/www
+sudo chown -R "$WWW_USER":sharedgroup /var/www
+sudo chmod -R 2775 /var/www
 
 echo "✅ Nginx with HTTP/3 and QUIC installed and configured successfully."
