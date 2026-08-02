@@ -16,10 +16,13 @@ ARCHIVE_FILE="$BACKUP_DIR/backup_${DATE}.7z"
 ARCHIVE_PASSWORD="UDp^@Y^rLSzPdCr!j"
 
 # PostgreSQL configuration
-PSQL="/usr/pgsql-17/bin/psql"
+# PG_VERSION and PG_PORT are placeholders; setup_pg_backup.sh injects the real
+# values into the deployed copy based on user input.
+PG_VERSION="17"
+PG_PORT="5432"
+PSQL="/usr/pgsql-${PG_VERSION}/bin/psql"
 PG_USER="postgres"
-PG_PORT="3554"
-PG_DUMP="/usr/pgsql-17/bin/pg_dump"
+PG_DUMP="/usr/pgsql-${PG_VERSION}/bin/pg_dump"
 
 # Logging
 LOGFILE="/var/backups/postgresql/backup_$DATE.log"

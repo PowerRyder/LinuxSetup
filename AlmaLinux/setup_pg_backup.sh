@@ -38,6 +38,29 @@ check_root() {
     fi
 }
 
+# Function to ask which PostgreSQL installation to back up
+collect_pg_config() {
+    print_status "Please provide details of the PostgreSQL installation to back up:"
+
+    read -p "Enter the PostgreSQL major version (e.g., 17 or 18): " PG_VERSION
+    if ! [[ "$PG_VERSION" =~ ^[0-9]+$ ]]; then
+        print_error "Invalid version number. Aborting."
+        exit 1
+    fi
+    if [ ! -x "/usr/pgsql-${PG_VERSION}/bin/pg_dump" ]; then
+        print_error "pg_dump not found at /usr/pgsql-${PG_VERSION}/bin/pg_dump"
+        print_error "Installed PostgreSQL versions: $(ls -d /usr/pgsql-* 2>/dev/null | tr '\n' ' ')"
+        exit 1
+    fi
+    print_success "Found PostgreSQL ${PG_VERSION} at /usr/pgsql-${PG_VERSION}"
+
+    read -p "Enter the port PostgreSQL is running on (e.g., 5432): " PG_PORT
+    if ! [[ "$PG_PORT" =~ ^[0-9]+$ ]] || [ "$PG_PORT" -lt 1 ] || [ "$PG_PORT" -gt 65535 ]; then
+        print_error "Invalid port number. Aborting."
+        exit 1
+    fi
+}
+
 # Function to detect OS and install p7zip
 install_p7zip() {
     print_status "Installing p7zip (7z) package..."
@@ -137,6 +160,11 @@ setup_backup_script() {
         exit 1
     fi
     
+    # Inject the user-provided PostgreSQL version and port into the deployed copy
+    sed -i "s/^PG_VERSION=.*/PG_VERSION=\"${PG_VERSION}\"/" "$SCRIPT_PATH"
+    sed -i "s/^PG_PORT=.*/PG_PORT=\"${PG_PORT}\"/" "$SCRIPT_PATH"
+    print_success "Configured backup script for PostgreSQL ${PG_VERSION} on port ${PG_PORT}" >&2
+
     # Make script executable
     chmod +x "$SCRIPT_PATH"
     chown root:root "$SCRIPT_PATH"
@@ -226,6 +254,7 @@ display_summary() {
     print_success "=== PostgreSQL Backup Setup Complete ==="
     echo
     echo "Configuration Summary:"
+    echo "  • PostgreSQL Version: ${PG_VERSION} (port ${PG_PORT})"
     echo "  • Backup Directory: /var/backups/postgresql"
     echo "  • Script Location: /var/backups/postgresql/pg_backup.sh"
     echo "  • Schedule: Daily at 2:00 AM IST (Asia/Kolkata)"
@@ -254,7 +283,10 @@ main() {
     
     # Check if running as root
     check_root
-    
+
+    # Ask which PostgreSQL version/port to back up
+    collect_pg_config
+
     # Install required packages
     install_p7zip
     
